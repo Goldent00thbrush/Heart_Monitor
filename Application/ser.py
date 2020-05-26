@@ -13,9 +13,12 @@ import string
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import time
-
+#defs string literals
+MSG_SER="Cannot connect to serial port"
+MSG_FRQ = "Invalid number! \n" \
+          "It  has to be between 1.525Hz to 100KHz"
 # warning pop for serial connection
-def popup_bonus():
+def popup_bonus(x):
     win = Toplevel() #new top level window
     #styling
     win.wm_title("Serial Connection")
@@ -24,7 +27,7 @@ def popup_bonus():
     win.resizable(False, False)
 
     #text to display
-    l = Label(win, text="Cannot connect to serial port", background = "white", fg = "red", font=("Ink Free", 12, "bold"))
+    l = Label(win, text=x, background = "white", fg = "red", font=("Ink Free", 12, "bold"))
     l.grid(row=0, column=0)
 
     #button to close window
@@ -79,13 +82,22 @@ def connect(s):
         ser.baudrate = 115200 #set baud rate
         getVal(variable_br.get()) #change baudrate if needed
     except serial.serialutil.SerialException:
-        popup_bonus() #warning if cannot connect
+        popup_bonus(MSG_SER) #warning if cannot connect
 
 
 #function to serially connect the data for graph
 def data_ecg():
-    global ser
-    return int(ser.readline().decode("utf-8")) #gives read value
+    global ser, ani_flag, first_read
+    while (ser.inWaiting() <= 0):
+        var = 0
+    x = ser.readline().decode("utf-8")
+    if(x=="-\n"and not first_read):
+        ani_flag= False
+        return 0
+    elif(first_read and x=="-\n"):
+        first_read = False
+        return 0
+    return int(x) #gives read value
 
 # This function is called periodically from FuncAnimation to animate the graph
 def animate(i, xs, ys):
@@ -108,18 +120,27 @@ def animate(i, xs, ys):
     plt.subplots_adjust(bottom=0.30)
     plt.title('Heart Beat')
     plt.ylabel('ECG (V)')
+#for the frames to be used in animation
+def gen_function():
+    global ani_flag
+    i = 0
+    while ani_flag:
+        i += 1
+        yield i
 
 #method for button to graph
 def button_ecg():
-    global ser
+    global ser, ani_flag, first_read
     global fig, xs, ys, canvas
     global master
     if (ser == None): #checks if serial port is connected
-        popup_bonus()
+        popup_bonus(MSG_SER)
         return
     ser.write(bytes(b'g')) #requests data from port
     ser.write(bytes(b'g'))
-    ani = animation.FuncAnimation(fig, animate, fargs=(xs, ys), interval=10, frames=240, repeat=False) #animate graph
+    ani_flag=True
+    #first_read = True
+    ani = animation.FuncAnimation(fig, animate, fargs=(xs, ys), interval=10, frames=gen_function, repeat=False) #animate graph
     canvas.draw() #updates canvas
     master.mainloop()
 
@@ -127,7 +148,7 @@ def button_ecg():
 def ok():
    global ser
    if (variable_p.get() == "COM3"): #does not connect to COM3
-       popup_bonus()
+       popup_bonus(MSG_SER)
    elif (ser != None and ser.name == variable_p.get()): #change baud rate
        getVal(variable_br.get())
    else:
@@ -138,14 +159,37 @@ def bpm_button():
     global master
     global ser, label
     if (ser == None): #check if connection exists
-        popup_bonus()
+        popup_bonus(MSG_SER)
         return
     ser.write(bytes(b'h')) #send request
-    #time.sleep(2.5)
     while(ser.inWaiting()<=0):
         var =0
     var = ser.readline().decode("utf-8")
     label.configure(text=var)
+
+#to check for values
+def isfloat(value):
+  try:
+    float(value)
+    return True
+  except ValueError:
+    return False
+
+#sampling rate button
+def button_sample():
+    #valid
+    global master
+    global ser, stext
+    if (ser == None):  # check if connection exists
+        popup_bonus(MSG_SER)
+        return
+    s =stext.get()
+    if(not isfloat(s) or float(s)<1.525 or float(s)>100000):
+        popup_bonus(MSG_FRQ)
+        return
+    ser.write(bytes(b'f'))  # send request
+    ser.write(bytes(b'f'))
+    ser.write((s+'-').encode())
 
 #baud rate options
 OPTIONS_BAUDRATES = [ "256000","128000", "115200","57600", "56000", "38400", "19200", "14400", "9600" , "4800", "2400", "1200"]
@@ -154,6 +198,8 @@ OPTIONS_PORTS = [p.device for p in list(serial.tools.list_ports.comports())]
 master = Tk()
 master.title("Heart Rate Monitor")
 #global variables
+ani_flag= True
+first_read = True
 ser = None
 var = '0'
 fig = plt.figure()
@@ -191,13 +237,21 @@ ser_ok = Button(frame_left, text="OK", command=ok, background = "red",  activeba
 ser_ok.grid(row=3, column=0)
 #button for graph
 h_view = Button(frame_left, text="measure", command=button_ecg, background = "red",  activebackground = "red", fg = "white", font=("Ink Free", 12, "bold"))
-h_view.grid(row=8, column=0)
+h_view.grid(row=9, column=0)
+#button for sampling rate
+s_view = Button(frame_left, text="change", command=button_sample, background = "red",  activebackground = "red", fg = "white", font=("Ink Free", 12, "bold"))
+s_view.grid(row=8, column=2, padx=(10,0))
 #button for measuring bpm
 bpm = Button(frame_left, text="bpm", command=bpm_button, background = "red",  activebackground = "red", fg = "white", font=("Ink Free", 12, "bold"))
 bpm.grid(row=6, column=0)
 #bpm label for value
 label = Label(frame_left, text=var, background = "white", fg = "red", font=("Ink Free", 11) )
 label.grid(row=5, column=0)
+#sampling rate entry
+stext = Entry(frame_left, width =10)
+stext.insert(0 , "4")
+stext.configure(fg = "red",font=("Ink Free", 12))
+stext.grid(row=8, column=0)
 #section titles
 title = Label(frame_left, text= "Serial Connection", background = "white", fg = "red", font=("Ink Free", 12, "bold"))
 title.grid(row=0, column =0)
@@ -207,6 +261,9 @@ title2.grid(row=4, column=0, pady=(20,0))
 
 title3 = Label(frame_left,text="Graph ECG", background = "white", fg = "red", font=("Ink Free", 12, "bold"))
 title3.grid(row=7, column=0, pady=(20,0))
+
+label2 = Label(frame_left,text="Hz", background = "white", fg = "red", font=("Ink Free", 12 ))
+label2.grid(row=8, column=1)
 #canvas to hold graph
 canvas = FigureCanvasTkAgg(figure=fig, master=frame_center)
 canvas.draw()
